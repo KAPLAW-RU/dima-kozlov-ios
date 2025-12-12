@@ -2,7 +2,9 @@
 
 Публичный проект писателя **Димы Козлова** — iOS приложение с коллекцией рассказов и фотографий за период с 1990 по 2025 год.
 
-<img width="1206" height="2622" alt="Simulator Screenshot - iPhone 17 Pro - 2025-12-12 at 19 50 42" src="https://github.com/user-attachments/assets/a0382fdc-8e43-4497-8ff5-ee9ea3cad9fc" />
+<div align="center">
+  <img width="400" alt="Simulator Screenshot - iPhone 17 Pro" src="https://github.com/user-attachments/assets/a0382fdc-8e43-4497-8ff5-ee9ea3cad9fc" />
+</div>
 
 
 ## О проекте
