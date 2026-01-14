@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var aiService = AIService()
     @State private var viewMode: ViewMode = .texts
     @State private var search = ""
     @State private var selectedStory: Story?
@@ -15,6 +16,8 @@ struct ContentView: View {
     @State private var showMenu: Bool = false
     @State private var stories: [Story] = []
     @State private var storiesLoaded: Bool = false
+    @State private var showSettings: Bool = false
+    @State private var showGenerateStory: Bool = false
 
     private var filteredStories: [Story] {
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -36,12 +39,44 @@ struct ContentView: View {
         
         do {
             let data = try Data(contentsOf: url)
-            let loadedStories = try JSONDecoder().decode([Story].self, from: data)
+            var loadedStories = try JSONDecoder().decode([Story].self, from: data)
+            
+            // Загружаем сгенерированные рассказы из UserDefaults
+            if let generatedData = UserDefaults.standard.data(forKey: "generated_stories"),
+               let generatedStories = try? JSONDecoder().decode([Story].self, from: generatedData) {
+                loadedStories.append(contentsOf: generatedStories)
+            }
+            
             self.stories = loadedStories
             self.storiesLoaded = true
         } catch {
             print("Ошибка загрузки рассказов: \(error)")
             storiesLoaded = true
+        }
+    }
+    
+    // Сохраняем сгенерированный рассказ
+    func saveGeneratedStory(_ story: Story) {
+        // Загружаем существующие сгенерированные рассказы
+        var generatedStories: [Story] = []
+        if let data = UserDefaults.standard.data(forKey: "generated_stories"),
+           let decoded = try? JSONDecoder().decode([Story].self, from: data) {
+            generatedStories = decoded
+        }
+        
+        // Добавляем новый рассказ (если его еще нет)
+        if !generatedStories.contains(where: { $0.id == story.id }) {
+            generatedStories.append(story)
+            
+            // Сохраняем обратно
+            if let encoded = try? JSONEncoder().encode(generatedStories) {
+                UserDefaults.standard.set(encoded, forKey: "generated_stories")
+            }
+            
+            // Обновляем список рассказов
+            if !stories.contains(where: { $0.id == story.id }) {
+                stories.append(story)
+            }
         }
     }
 
@@ -75,6 +110,33 @@ struct ContentView: View {
                     .onChange(of: search) { _ in
                         visibleCount = 18
                     }
+                        
+                        // Кнопка генерации рассказа (если API ключ установлен)
+                        if !aiService.aiToken.isEmpty && viewMode == .texts {
+                            Button(action: {
+                                showGenerateStory = true
+                            }) {
+                                HStack {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 16, weight: .bold))
+                                    Text("Сгенерировать рассказ")
+                                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                                }
+                                .foregroundStyle(Color.paper)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.ink, Color.absurdRed.opacity(0.8)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .shadow(color: Color.absurdRed.opacity(0.3), radius: 8, y: 4)
+                            }
+                            .padding(.horizontal, 20)
+                        }
 
                         switch viewMode {
                         case .texts:
@@ -118,9 +180,22 @@ struct ContentView: View {
         }
         .modifier(StoryPresentationModifier(selectedStory: $selectedStory, photoForStory: photoForStory))
         .overlay(alignment: .topTrailing) {
-            MenuButton(showMenu: $showMenu, currentMode: $viewMode)
-                .padding(.trailing, 16)
-                .padding(.top, 20)
+            MenuButton(
+                showMenu: $showMenu,
+                currentMode: $viewMode,
+                onGenerateStory: { showGenerateStory = true },
+                onSettings: { showSettings = true }
+            )
+            .padding(.trailing, 16)
+            .padding(.top, 20)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(aiService: aiService)
+        }
+        .sheet(isPresented: $showGenerateStory) {
+            GenerateStoryView(aiService: aiService, onStoryGenerated: { story in
+                saveGeneratedStory(story)
+            })
         }
         .onAppear {
             if !storiesLoaded {
@@ -135,6 +210,8 @@ struct ContentView: View {
 private struct MenuButton: View {
     @Binding var showMenu: Bool
     @Binding var currentMode: ViewMode
+    var onGenerateStory: () -> Void
+    var onSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
@@ -168,6 +245,18 @@ private struct MenuButton: View {
                         currentMode = .photos
                         showMenu = false
                     }
+                    
+                    Divider()
+                        .padding(.vertical, 4)
+                    
+                    MenuItem(label: "Сгенерировать рассказ", isActive: false, icon: "sparkles") {
+                        onGenerateStory()
+                        showMenu = false
+                    }
+                    MenuItem(label: "Настройки", isActive: false, icon: "gearshape") {
+                        onSettings()
+                        showMenu = false
+                    }
                 }
                 .padding(14)
                 .background(Color.paper)
@@ -187,10 +276,17 @@ private struct MenuItem: View {
     let label: String
     let isActive: Bool
     let action: () -> Void
+    var icon: String? = nil
 
     var body: some View {
         Button(action: action) {
             HStack {
+                if let icon = icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.ink.opacity(0.7))
+                        .frame(width: 20)
+                }
                 Text(label)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                 Spacer()
@@ -413,7 +509,7 @@ private struct PhotoGrid: View {
     }
 }
 
-private struct StoryCard: View {
+struct StoryCard: View {
     let story: Story
 
     var body: some View {
@@ -636,7 +732,7 @@ private enum ViewMode: CaseIterable {
     }
 }
 
-private struct Story: Identifiable, Equatable, Codable {
+struct Story: Identifiable, Equatable, Codable {
     let id: String
     let title: String
     let date: String
@@ -896,7 +992,7 @@ private struct PseudoRandom: RandomNumberGenerator {
     }
 }
 
-private struct PaperBackground: View {
+struct PaperBackground: View {
     var body: some View {
         LinearGradient(
             colors: [Color.paper, Color.paper.opacity(0.9)],
@@ -944,7 +1040,7 @@ private struct StoryPresentationModifier: ViewModifier {
 
 // MARK: - Colors
 
-private extension Color {
+extension Color {
     static let ink = Color(hex: "#0c0c0c")
     static let absurdRed = Color(hex: "#e63946")
     static let paper = Color(hex: "#f8f4ec")
